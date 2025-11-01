@@ -1,8 +1,3 @@
-Absolutely ✅ — here’s a clean and professional **README.md** tailored for your `vul-dashboard` project.
-It explains setup, usage, GitHub Actions automation, and troubleshooting clearly.
-
----
-
 ### 🧠 **README.md**
 
 ```markdown
@@ -173,3 +168,4 @@ Feel free to modify and use it for your own projects.
 Would you like me to include a **`requirements.txt`** file too (so setup is one command)?  
 It would contain Flask, python-nmap, and a few helpers.
 ```
+
