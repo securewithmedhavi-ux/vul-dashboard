@@ -1,21 +1,20 @@
-﻿import subprocess
+﻿# nmap_scan.py
+import subprocess
 import xml.etree.ElementTree as ET
-import sqlite3
 from datetime import datetime
+from app import app, db, Vulnerability  # ✅ import app as well
 
 def run_nmap_scan(target):
     """Runs an Nmap scan and returns the parsed results."""
     print(f"🔍 Scanning target: {target} ...")
 
-    # Run Nmap with XML output
     result = subprocess.run(['nmap', '-oX', '-', target], capture_output=True, text=True)
 
     if result.returncode != 0:
-        print("❗ Nmap returned an error or was not found. Output:")
+        print("❗ Nmap returned an error:")
         print(result.stderr)
         return []
 
-    # Parse XML output
     root = ET.fromstring(result.stdout)
     findings = []
 
@@ -36,24 +35,26 @@ def run_nmap_scan(target):
     return findings
 
 
-def save_to_db(findings):
-    """Save scan results to SQLite database."""
+def save_to_postgres(findings):
+    """Save scan results to PostgreSQL using SQLAlchemy."""
     if not findings:
         print("ℹ️  No findings to save.")
         return
 
-    conn = sqlite3.connect('vulns.db')
-    cursor = conn.cursor()
+    # ✅ Use Flask application context here
+    with app.app_context():
+        for f in findings:
+            vuln = Vulnerability(
+                target=f[0],
+                port=int(f[1]) if f[1].isdigit() else None,
+                service=f[2],
+                state=f[3],
+                timestamp=datetime.now(),
+            )
+            db.session.add(vuln)
 
-    for f in findings:
-        cursor.execute('''
-            INSERT INTO vulnerabilities (target, port, service, state, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (f[0], int(f[1]) if f[1] and f[1].isdigit() else None, f[2], f[3], datetime.now()))
-
-    conn.commit()
-    conn.close()
-    print("💾 Results saved to database.")
+        db.session.commit()
+        print("💾 Results saved to PostgreSQL.")
 
 
 if __name__ == "__main__":
@@ -62,5 +63,5 @@ if __name__ == "__main__":
         print("No target provided. Exiting.")
     else:
         findings = run_nmap_scan(target)
-        save_to_db(findings)
+        save_to_postgres(findings)
         print("✅ Scan complete.")
