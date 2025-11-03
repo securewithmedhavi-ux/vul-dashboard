@@ -1,3 +1,5 @@
 Flask
 Flask-SQLAlchemy
 psycopg2-binary
+celery>=5.3.0
+redis>=4.0.0
