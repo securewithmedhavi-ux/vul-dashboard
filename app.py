@@ -1,6 +1,6 @@
-# app.py
 from flask import Flask, render_template, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from sqlalchemy import func
 from collections import Counter
 from datetime import datetime
@@ -12,6 +12,9 @@ import xml.etree.ElementTree as ET
 # Import Celery instance
 from celery_app import celery
 
+# Import database and model
+from models import db, Vulnerability
+
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
@@ -21,29 +24,9 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-db = SQLAlchemy(app)
-
-
-# --- Database Model ---
-class Vulnerability(db.Model):
-    __tablename__ = "vulnerabilities"
-    id = db.Column(db.Integer, primary_key=True)
-    target = db.Column(db.String(255))
-    port = db.Column(db.Integer)
-    service = db.Column(db.String(255))
-    state = db.Column(db.String(50))
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def as_dict(self):
-        return {
-            "id": self.id,
-            "target": self.target,
-            "port": self.port,
-            "service": self.service,
-            "state": self.state,
-            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
+# Initialize DB and Migrations
+db.init_app(app)
+migrate = Migrate(app, db)
 
 # --- Helper Function for Nmap Scan ---
 def run_nmap_scan(target):
@@ -73,7 +56,6 @@ def run_nmap_scan(target):
 
     return findings
 
-
 # --- Celery Task ---
 @celery.task(bind=True, name="vulndashboard.run_scan_task")
 def run_scan_task(self, target):
@@ -98,7 +80,6 @@ def run_scan_task(self, target):
             db.session.rollback()
         return {"status": "failed", "error": str(e)}
 
-
 # --- Utility Function ---
 def get_db_rows(limit=1000):
     try:
@@ -113,13 +94,11 @@ def get_db_rows(limit=1000):
         print(f"[!] Database error: {e}")
         return []
 
-
 # --- Flask API Routes ---
 @app.route("/api/rows")
 def api_rows():
     rows = get_db_rows(1000)
     return jsonify(rows)
-
 
 @app.route("/api/chart-data")
 def api_chart_data():
@@ -140,7 +119,6 @@ def api_chart_data():
         "state": {"labels": list(state_counts.keys()), "values": list(state_counts.values())},
         "service": {"labels": [s for s, _ in svc_counts], "values": [v for _, v in svc_counts]},
     })
-
 
 @app.route("/api/stats")
 def api_stats():
@@ -165,7 +143,6 @@ def api_stats():
         "last_scan": last_scan,
     })
 
-
 @app.route("/api/scan", methods=["POST"])
 def api_trigger_scan():
     """Trigger async Nmap scan using Celery."""
@@ -178,7 +155,6 @@ def api_trigger_scan():
     task = celery.send_task("vulndashboard.run_scan_task", args=[target])
     return jsonify({"task_id": task.id}), 202
 
-
 @app.route("/api/task/<task_id>")
 def api_task_status(task_id):
     """Check Celery task status."""
@@ -190,7 +166,6 @@ def api_task_status(task_id):
     }
     return jsonify(info)
 
-
 @app.route("/")
 def index():
     """Render dashboard and clear all previous results."""
@@ -199,7 +174,6 @@ def index():
         db.session.commit()
         print("🧹 Cleared old vulnerabilities on page refresh")
     return render_template("index.html")
-
 
 # --- Entry Point ---
 if __name__ == "__main__":

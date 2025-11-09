@@ -13,8 +13,13 @@ COPY . /app
 # Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Set environment variables for Flask
+ENV FLASK_APP=wsgi.py
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_ENV=development
+
 # Expose the Flask port
 EXPOSE 5000
 
-# Run Flask
-CMD ["python", "app.py"]
+# Default command to run the app
+CMD ["flask", "run"]
