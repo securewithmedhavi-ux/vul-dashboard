@@ -6,17 +6,16 @@ from collections import Counter
 from datetime import datetime
 from celery.result import AsyncResult
 import os
-
-# Import Celery instance (shared across worker and app)
-from celery_app import celery
 import subprocess
 import xml.etree.ElementTree as ET
 
+# Import Celery instance
+from celery_app import celery
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
-# Database Configuration (from environment or fallback)
+# Database Configuration
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
     "DATABASE_URL", "postgresql://postgres:postgres@db:5432/vulndb"
 )
@@ -50,8 +49,7 @@ class Vulnerability(db.Model):
 def run_nmap_scan(target):
     """Run Nmap scan and parse XML output."""
     print(f"🔍 Running Nmap scan on target: {target}")
-    result = subprocess.run(["nmap", "-oX", "-", target],
-                            capture_output=True, text=True)
+    result = subprocess.run(["nmap", "-oX", "-", target], capture_output=True, text=True)
 
     if result.returncode != 0:
         raise Exception(result.stderr or "Nmap scan failed")
@@ -195,6 +193,11 @@ def api_task_status(task_id):
 
 @app.route("/")
 def index():
+    """Render dashboard and clear all previous results."""
+    with app.app_context():
+        db.session.query(Vulnerability).delete()
+        db.session.commit()
+        print("🧹 Cleared old vulnerabilities on page refresh")
     return render_template("index.html")
 
 
