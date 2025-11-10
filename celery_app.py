@@ -1,31 +1,32 @@
 # celery_app.py
-import os
 from celery import Celery
+import os
 
-BROKER = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
-BACKEND = os.getenv("CELERY_RESULT_BACKEND", BROKER)
+def make_celery(app=None):
+    """
+    Create and configure a Celery instance.
+    This function avoids circular imports.
+    """
+    celery = Celery(
+        "vulndashboard",
+        broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
+        backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0"),
+        include=["tasks"]  # Ensure Celery knows where to find your tasks
+    )
 
-celery = Celery(
-    "vulndashboard",
-    broker=BROKER,
-    backend=BACKEND,
-)
+    if app:
+        celery.conf.update(app.config)
 
-celery.conf.update(
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-)
+        class ContextTask(celery.Task):
+            def __call__(self, *args, **kwargs):
+                with app.app_context():
+                    return self.run(*args, **kwargs)
 
-# ✅ Import task so it’s properly registered with this Celery instance
-try:
-    from tasks import run_scan_task
-    celery.register_task(run_scan_task)
+        celery.Task = ContextTask
+
     print("✅ Celery task 'vulndashboard.run_scan_task' registered successfully.")
-except Exception as e:
-    print(f"[WARN] Task registration failed: {e}")
+    return celery
 
-if __name__ == "__main__":
-    celery.start()
+
+# Allow worker to start directly from this file
+celery = make_celery()

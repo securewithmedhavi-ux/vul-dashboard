@@ -16,6 +16,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       retries: 5
+    restart: always
 
   redis:
     image: redis:7
@@ -23,10 +24,13 @@ services:
     ports:
       - "6379:6379"
     command: ["redis-server", "--save", "60", "1"]
+    restart: always
 
   app:
     build: .
     container_name: vulndashboard
+    working_dir: /app
+    command: ["python", "app.py"]
     depends_on:
       db:
         condition: service_healthy
@@ -38,17 +42,18 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - FLASK_ENV=development
       - PYTHONPATH=/app
+      - VULNERS_API_KEY=${VULNERS_API_KEY}
     ports:
       - "5000:5000"
     volumes:
       - .:/app
-    working_dir: /app
-    command: ["python", "app.py"]
     restart: always
 
   worker:
     build: .
     container_name: vulndashboard-worker
+    working_dir: /app
+    command: ["celery", "-A", "celery_app.celery", "worker", "--loglevel=info", "--concurrency=1"]
     depends_on:
       db:
         condition: service_healthy
@@ -61,10 +66,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - PYTHONPATH=/app
+      - VULNERS_API_KEY=${VULNERS_API_KEY}
     volumes:
       - .:/app
-    working_dir: /app
-    command: ["celery", "-A", "celery_app.celery", "worker", "--loglevel=info", "--concurrency=1"]
     restart: always
 
 volumes:

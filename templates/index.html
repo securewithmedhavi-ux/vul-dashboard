@@ -30,9 +30,15 @@
       color: #00ffcc;
       text-shadow: 0 0 15px #00ffcc70;
     }
-    canvas {
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 10px;
+    .cvss-low { color: #4caf50; font-weight: 600; }
+    .cvss-medium { color: #ffc107; font-weight: 600; }
+    .cvss-high { color: #f44336; font-weight: 600; }
+    td, th { vertical-align: middle !important; }
+    .desc {
+      max-width: 400px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   </style>
 </head>
@@ -69,8 +75,20 @@
       <div class="col-12">
         <div class="glass-card">
           <h5>Scan Results</h5>
-          <table class="table table-dark table-striped table-hover small">
-            <thead><tr><th>ID</th><th>Target</th><th>Port</th><th>Service</th><th>State</th><th>Timestamp</th></tr></thead>
+          <table class="table table-dark table-striped table-hover small align-middle">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Target</th>
+                <th>Port</th>
+                <th>Service</th>
+                <th>State</th>
+                <th>CVE ID</th>
+                <th>CVSS</th>
+                <th>Description</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
             <tbody id="data-table"></tbody>
           </table>
         </div>
@@ -133,13 +151,20 @@
       }
     }
 
+    function getCvssClass(score) {
+      if (score == null) return '';
+      if (score <= 3.9) return 'cvss-low';
+      if (score <= 6.9) return 'cvss-medium';
+      return 'cvss-high';
+    }
+
     async function loadDashboard() {
       const res = await fetch('/api/rows');
       const data = await res.json();
 
       if (!Array.isArray(data) || data.length === 0) {
         document.getElementById("data-table").innerHTML =
-          `<tr><td colspan="6" class="text-center">No data found</td></tr>`;
+          `<tr><td colspan="9" class="text-center">No data found</td></tr>`;
         return;
       }
 
@@ -155,15 +180,27 @@
 
       // Table
       const tbody = document.getElementById('data-table');
-      tbody.innerHTML = data.map(d => `
-        <tr>
-          <td>${d.id}</td>
-          <td>${d.target}</td>
-          <td>${d.port}</td>
-          <td>${d.service}</td>
-          <td>${d.state}</td>
-          <td>${d.timestamp}</td>
-        </tr>`).join('');
+      tbody.innerHTML = data.map(d => {
+        const cvssClass = getCvssClass(d.cvss_score);
+        const cveLink = d.cve_id
+          ? `<a href="https://nvd.nist.gov/vuln/detail/${d.cve_id}" target="_blank" class="text-info text-decoration-none">${d.cve_id}</a>`
+          : '-';
+        const cvss = d.cvss_score != null ? `<span class="${cvssClass}">${d.cvss_score}</span>` : '-';
+        const desc = d.cve_description ? d.cve_description : '-';
+
+        return `
+          <tr>
+            <td>${d.id}</td>
+            <td>${d.target}</td>
+            <td>${d.port}</td>
+            <td>${d.service}</td>
+            <td>${d.state}</td>
+            <td>${cveLink}</td>
+            <td>${cvss}</td>
+            <td class="desc" title="${desc}">${desc}</td>
+            <td>${d.timestamp}</td>
+          </tr>`;
+      }).join('');
 
       // Port States (Pie)
       const states = {};
@@ -171,25 +208,16 @@
       const stateLabels = Object.keys(states);
       const stateValues = Object.values(states);
 
-      if (document.getElementById('state-chart').data) {
-        Plotly.react('state-chart', [{
-          labels: stateLabels,
-          values: stateValues,
-          type: 'pie',
-          marker: { colors: ['#00ffcc', '#ff6b6b', '#ffe66d', '#5f27cd'] }
-        }]);
-      } else {
-        Plotly.newPlot('state-chart', [{
-          labels: stateLabels,
-          values: stateValues,
-          type: 'pie',
-          marker: { colors: ['#00ffcc', '#ff6b6b', '#ffe66d', '#5f27cd'] }
-        }], {
-          paper_bgcolor: 'transparent',
-          plot_bgcolor: 'transparent',
-          font: { color: '#fff' }
-        });
-      }
+      Plotly.react('state-chart', [{
+        labels: stateLabels,
+        values: stateValues,
+        type: 'pie',
+        marker: { colors: ['#00ffcc', '#ff6b6b', '#ffe66d', '#5f27cd'] }
+      }], {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        font: { color: '#fff' }
+      });
 
       // Services (Bar)
       const services = {};
