@@ -1,10 +1,9 @@
-# app.py
 from flask import Flask, render_template, jsonify, request
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from celery.result import AsyncResult
 from celery_app import make_celery
-from models import db, Vulnerability
+from models import db, Vulnerability, CVE  # include CVE
 from datetime import datetime
 import os
 
@@ -24,12 +23,14 @@ db.init_app(app)
 migrate = Migrate(app, db)
 celery = make_celery(app)
 
+
 # -------------------------
-# Celery Task
+# Celery Scan Task
 # -------------------------
 @celery.task(name="vulndashboard.run_scan_task")
 def run_scan_task(target):
     import nmap
+    import requests
 
     scanner = nmap.PortScanner()
     results = []
@@ -39,10 +40,9 @@ def run_scan_task(target):
 
         for host in scanner.all_hosts():
             for proto in scanner[host].all_protocols():
-                ports = scanner[host][proto].keys()
-                for port in ports:
-                    state = scanner[host][proto][port]["state"]
-                    service = scanner[host][proto][port]["name"]
+                for port, details in scanner[host][proto].items():
+                    state = details["state"]
+                    service = details["name"]
 
                     vuln = Vulnerability(
                         target=host,
@@ -54,6 +54,24 @@ def run_scan_task(target):
                     db.session.add(vuln)
                     results.append(vuln.as_dict())
 
+                    # --- CVE Fetch ---
+                    try:
+                        r = requests.get(f"https://vulners.com/api/v3/search/lucene/?query={service}")
+                        if r.status_code == 200:
+                            data = r.json()
+                            if data.get("data", {}).get("search"):
+                                for item in data["data"]["search"]:
+                                    cve = CVE(
+                                        service_name=service,
+                                        cve_id=item["id"],
+                                        description=item.get("description", ""),
+                                        severity=item.get("cvss", 0.0),
+                                        published_date=item.get("published", ""),
+                                    )
+                                    db.session.add(cve)
+                    except Exception as api_error:
+                        print("Vulners API error:", api_error)
+
         db.session.commit()
 
     except Exception as e:
@@ -63,24 +81,24 @@ def run_scan_task(target):
 
     return {"status": "success", "count": len(results)}
 
+
 # -------------------------
 # Routes
 # -------------------------
 @app.route("/")
 def index():
-    # ✅ Clear all previous results whenever the page loads
-    try:
-        db.session.query(Vulnerability).delete()
-        db.session.commit()
-        print("✅ Database cleared on refresh")
-    except Exception as e:
-        db.session.rollback()
-        print("⚠️ Error clearing database:", e)
+
+    # -------------------------
+    # AUTO-CLEAR DB ON PAGE LOAD
+    # -------------------------
+    db.session.query(Vulnerability).delete()
+    db.session.query(CVE).delete()
+    db.session.commit()
+    print("✔ Auto-cleared all vulnerabilities & CVEs on page refresh")
 
     return render_template("index.html")
 
 
-# Both endpoints for compatibility
 @app.route("/start_scan", methods=["POST"])
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
@@ -92,7 +110,6 @@ def start_scan():
     return jsonify({"task_id": task.id})
 
 
-# ✅ Route to get Celery task status
 @app.route("/api/task/<task_id>")
 @app.route("/scan_status/<task_id>")
 def scan_status(task_id):
@@ -111,12 +128,19 @@ def results():
 @app.route("/clear_results", methods=["POST"])
 def clear_results():
     try:
-        num_deleted = db.session.query(Vulnerability).delete()
+        db.session.query(Vulnerability).delete()
+        db.session.query(CVE).delete()
         db.session.commit()
-        return jsonify({"status": "success", "deleted": num_deleted})
+        return jsonify({"status": "success"})
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/cves")
+def get_cves():
+    cves = CVE.query.order_by(CVE.published_date.desc()).all()
+    return jsonify([cve.as_dict() for cve in cves])
 
 
 # -------------------------
